@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>澳門即時交通路況</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        body, html { margin: 0; padding: 0; height: 100%; font-family: sans-serif; }
+        #map { width: 100vw; height: 100vh; }
+        .legend {
+            position: absolute; bottom: 20px; left: 20px; z-index: 1000;
+            background: white; padding: 10px; border-radius: 5px; box-shadow: 0 0 15px rgba(0,0,0,0.2);
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div class="legend">
+        🟢 暢通 <br> 🟡 車多 <br> 🔴 壅塞
+    </div>
+
+    <script>
+        // 初始化地圖，中心點設為澳門
+        const map = L.map('map').setView([22.195, 113.545], 14);
+
+        // 載入深色酷炫底圖 (CartoDB Dark Matter) 或換回 OpenStreetMap
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OpenStreetMap &copy; CARTO',
+            maxZoom: 19
+        }).addTo(map);
+
+        let geojsonLayer = null;
+
+        async function fetchTraffic() {
+            try {
+                const response = await fetch('/api/traffic');
+                const data = await response.json();
+
+                if (geojsonLayer) { map.removeLayer(geojsonLayer); }
+
+                geojsonLayer = L.geoJSON(data, {
+                    style: function(feature) {
+                        if (feature.properties.type === 'street') {
+                            return { color: feature.properties.color, weight: 4, opacity: 0.8 };
+                        }
+                    },
+                    pointToLayer: function(feature, latlng) {
+                        if (feature.properties.type === 'camera') {
+                            return L.circleMarker(latlng, {
+                                radius: 6, fillColor: feature.properties.color,
+                                color: "#fff", weight: 1, fillOpacity: 1
+                            });
+                        }
+                    },
+                    onEachFeature: function(feature, layer) {
+                        if (feature.properties.type === 'camera') {
+                            layer.bindPopup(`<b>${feature.properties.name}</b><br>塞車指數: ${feature.properties.score}<br>總車流量: ${feature.properties.flow_total} /分`);
+                        }
+                    }
+                }).addTo(map);
+            } catch (error) { console.error('無法抓取資料:', error); }
+        }
+
+        // 首次載入並設定每 5 秒更新一次
+        fetchTraffic();
+        setInterval(fetchTraffic, 5000);
+    </script>
+</body>
+</html>
