@@ -88,10 +88,17 @@
 
         async function fetchTraffic() {
             try {
-                // 如果目前有打開的彈窗，我們先記住它是哪一個路口，避免刷新後彈窗消失
-                const currentPopupStr = map.hasLayer(map._popup) ? document.querySelector('.camera-stream')?.getAttribute('data-name') : null;
+                // 安全地取得目前打開的彈窗名稱
+                let currentPopupStr = null;
+                const activeVideo = document.querySelector('.camera-stream');
+                if (activeVideo) {
+                    currentPopupStr = activeVideo.getAttribute('data-name');
+                }
 
-                const response = await fetch('/api/traffic');
+                // ⚠️ 注意：這裡要換成你真實的 API 完整網址
+                const response = await fetch('https://macau-traffic.onrender.com/api/traffic');
+                
+                if (!response.ok) throw new Error(`HTTP 錯誤: ${response.status}`);
                 const data = await response.json();
 
                 // 更新左上角時間
@@ -128,7 +135,6 @@
                             const props = feature.properties;
                             const scorePercent = Math.round(props.score * 100);
                             
-                            // 👇 新增：準備好影片的網址，如果沒有則使用預設提示
                             const videoUrl = props.stream_url || "";
                             const videoElement = videoUrl 
                                 ? `<video class="camera-stream" data-name="${props.name}" data-url="${videoUrl}" width="100%" style="border-radius: 5px; background: #000; margin-bottom: 8px;" controls muted playsinline></video>`
@@ -138,9 +144,7 @@
                                 <div style="font-family: sans-serif; padding: 5px; width: 280px;">
                                     <b style="font-size: 14px; color: #333;">${props.name}</b><br>
                                     <hr style="margin: 8px 0; border: 0; border-top: 1px solid #eee;">
-                                    
                                     ${videoElement}
-                                    
                                     <div style="font-size: 13px;">
                                         🚦 壅塞程度: <b style="color:${props.color}">${scorePercent}%</b><br>
                                         🚗 即時車數: <b>${props.veh_active} 台</b><br>
@@ -150,7 +154,7 @@
                             `;
                             layer.bindPopup(popupContent, { maxWidth: 320 });
 
-                            // (可選) 讓刷新資料後，剛才打開的彈窗繼續保持打開狀態
+                            // 自動恢復剛才打開的彈窗
                             if (currentPopupStr === props.name) {
                                 setTimeout(() => layer.openPopup(), 10);
                             }
