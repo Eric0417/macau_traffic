@@ -3,69 +3,143 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>澳門即時交通路況</title>
+    <title>澳門即時交通路況監控系統</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <style>
-        body, html { margin: 0; padding: 0; height: 100%; font-family: sans-serif; }
+        body, html { margin: 0; padding: 0; height: 100%; font-family: "Microsoft JhengHei", sans-serif; background: #1a1a1a; }
         #map { width: 100vw; height: 100vh; }
+        
+        /* 更新時間面板 */
+        .info-panel {
+            position: absolute; top: 20px; left: 60px; z-index: 1000;
+            background: rgba(40, 40, 40, 0.9); color: white;
+            padding: 12px 20px; border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            border: 1px solid #444;
+            pointer-events: none;
+        }
+        .info-panel h2 { margin: 0 0 5px 0; font-size: 18px; color: #00d4ff; }
+        .update-time { font-size: 13px; color: #bbb; display: flex; align-items: center; }
+        
+        /* 呼吸燈效果 */
+        .status-dot {
+            height: 8px; width: 8px; background-color: #28a745;
+            border-radius: 50%; display: inline-block; margin-right: 8px;
+            box-shadow: 0 0 8px #28a745;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.3; }
+            100% { opacity: 1; }
+        }
+
         .legend {
-            position: absolute; bottom: 20px; left: 20px; z-index: 1000;
-            background: white; padding: 10px; border-radius: 5px; box-shadow: 0 0 15px rgba(0,0,0,0.2);
+            position: absolute; bottom: 30px; left: 20px; z-index: 1000;
+            background: rgba(255, 255, 255, 0.9); padding: 12px;
+            border-radius: 8px; font-size: 14px; line-height: 1.8;
+            box-shadow: 0 0 20px rgba(0,0,0,0.3);
         }
     </style>
 </head>
 <body>
+
+    <div class="info-panel">
+        <h2>澳門即時交通監控</h2>
+        <div class="update-time">
+            <span class="status-dot"></span>
+            最後更新時間：<span id="sync-time">載入中...</span>
+        </div>
+    </div>
+
     <div id="map"></div>
+    
     <div class="legend">
-        🟢 暢通 <br> 🟡 車多 <br> 🔴 壅塞
+        <b style="color: #333;">路況說明</b><br>
+        <span style="color: #28a745;">●</span> 🟢 暢通 (0-40%)<br>
+        <span style="color: #ffc107;">●</span> 🟡 車多 (40-70%)<br>
+        <span style="color: #dc3545;">●</span> 🔴 壅塞 (70-100%)
     </div>
 
     <script>
-        // 初始化地圖，中心點設為澳門
-        const map = L.map('map').setView([22.195, 113.545], 14);
+        // 初始化地圖
+        const map = L.map('map', {
+            zoomControl: false // 隱藏預設縮放鈕以美化介面
+        }).setView([22.193, 113.543], 14);
 
-        // 載入深色酷炫底圖 (CartoDB Dark Matter) 或換回 OpenStreetMap
+        // 使用 CartoDB Dark Matter 深色底圖
         L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; OpenStreetMap &copy; CARTO',
-            maxZoom: 19
+            attribution: '&copy; OpenStreetMap &copy; CARTO'
         }).addTo(map);
 
         let geojsonLayer = null;
 
         async function fetchTraffic() {
             try {
+                // 請確保後端 API 路徑正確 (Python 傳過來的 GeoJSON)
                 const response = await fetch('/api/traffic');
                 const data = await response.json();
+
+                // 更新左上角時間
+                if (data.last_updated) {
+                    document.getElementById('sync-time').innerText = data.last_updated;
+                }
 
                 if (geojsonLayer) { map.removeLayer(geojsonLayer); }
 
                 geojsonLayer = L.geoJSON(data, {
                     style: function(feature) {
                         if (feature.properties.type === 'street') {
-                            return { color: feature.properties.color, weight: 4, opacity: 0.8 };
+                            return { 
+                                color: feature.properties.color, 
+                                weight: 5, 
+                                opacity: 0.7,
+                                lineCap: 'round'
+                            };
                         }
                     },
                     pointToLayer: function(feature, latlng) {
                         if (feature.properties.type === 'camera') {
                             return L.circleMarker(latlng, {
-                                radius: 6, fillColor: feature.properties.color,
-                                color: "#fff", weight: 1, fillOpacity: 1
+                                radius: 7,
+                                fillColor: feature.properties.color,
+                                color: "#ffffff",
+                                weight: 2,
+                                fillOpacity: 1
                             });
                         }
                     },
                     onEachFeature: function(feature, layer) {
                         if (feature.properties.type === 'camera') {
-                            layer.bindPopup(`<b>${feature.properties.name}</b><br>塞車指數: ${feature.properties.score}<br>總車流量: ${feature.properties.flow_total} /分`);
+                            const props = feature.properties;
+                            // 將 0.85 這種分數轉為 85%
+                            const scorePercent = Math.round(props.score * 100);
+                            
+                            const popupContent = `
+                                <div style="font-family: sans-serif; padding: 5px;">
+                                    <b style="font-size: 14px; color: #333;">${props.name}</b><br>
+                                    <hr style="margin: 8px 0; border: 0; border-top: 1px solid #eee;">
+                                    <div style="font-size: 13px;">
+                                        🚦 壅塞程度: <b style="color:${props.color}">${scorePercent}%</b><br>
+                                        🚗 即時車數: <b>${props.veh_active} 台</b><br>
+                                        📈 估算流量: <b>${props.flow_total} 輛/分</b>
+                                    </div>
+                                </div>
+                            `;
+                            layer.bindPopup(popupContent);
                         }
                     }
                 }).addTo(map);
-            } catch (error) { console.error('無法抓取資料:', error); }
+            } catch (error) { 
+                console.error('無法抓取資料:', error);
+                document.getElementById('sync-time').innerText = "連線失敗";
+            }
         }
 
-        // 首次載入並設定每 5 秒更新一次
+        // 啟動與自動刷新
         fetchTraffic();
-        setInterval(fetchTraffic, 5000);
+        setInterval(fetchTraffic, 5000); // 每 5 秒與後端同步一次
     </script>
 </body>
 </html>
