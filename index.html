@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>澳門即時交通路況監控系統 (串流穩定版)</title>
+    <title>澳門即時交通路況監控系統 (極致穩定版)</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
@@ -67,13 +67,14 @@
 
         let geojsonLayer = null;
         let currentHls = null;
-        
-        // 紀錄目前正在觀看的攝像頭名稱，如果不是 null，代表正在看影片
         let watchingCameraName = null; 
+        
+        // 🌟 新增：串流網址快取字典。只在第一次收到時儲存，之後都不再改變。
+        const streamCache = {};
 
         async function fetchTraffic() {
             try {
-                // ⚠️ 請確保此處為你正確的 API 網址
+                // ⚠️ 如果是在雲端，記得改成你的絕對網址，例如 'https://你的後端.onrender.com/api/traffic'
                 const response = await fetch('/api/traffic');
                 const data = await response.json();
 
@@ -81,30 +82,22 @@
                     document.getElementById('sync-time').innerText = data.last_updated;
                 }
 
-                // 🌟 核心修復：如果使用者正在看影片，我們只更新文字數據，絕不刪除圖層！
                 if (watchingCameraName) {
                     const camData = data.features.find(f => f.properties.type === 'camera' && f.properties.name === watchingCameraName);
                     if (camData) {
                         const props = camData.properties;
                         const scorePercent = Math.round(props.score * 100);
                         
-                        // 動態更新彈窗內的文字，不干擾影片播放
                         const statScore = document.getElementById('stat-score');
-                        if (statScore) {
-                            statScore.innerText = scorePercent + '%';
-                            statScore.style.color = props.color;
-                        }
+                        if (statScore) { statScore.innerText = scorePercent + '%'; statScore.style.color = props.color; }
                         const statVeh = document.getElementById('stat-veh');
                         if (statVeh) statVeh.innerText = props.veh_active + ' 台';
-                        
                         const statFlow = document.getElementById('stat-flow');
                         if (statFlow) statFlow.innerText = props.flow_total + ' 輛/分';
                     }
-                    // 結束這次更新，保留原本的地圖圖層與影片播放器
                     return; 
                 }
 
-                // 如果沒有在看影片，才正常重繪整個地圖圖層
                 if (geojsonLayer) { map.removeLayer(geojsonLayer); }
 
                 geojsonLayer = L.geoJSON(data, {
@@ -115,24 +108,30 @@
                     },
                     pointToLayer: function(feature, latlng) {
                         if (feature.properties.type === 'camera') {
-                            return L.circleMarker(latlng, {
-                                radius: 7, fillColor: feature.properties.color, color: "#ffffff", weight: 2, fillOpacity: 1
-                            });
+                            return L.circleMarker(latlng, { radius: 7, fillColor: feature.properties.color, color: "#ffffff", weight: 2, fillOpacity: 1 });
                         }
                     },
                     onEachFeature: function(feature, layer) {
                         if (feature.properties.type === 'camera') {
                             const props = feature.properties;
+                            const camName = props.name;
                             const scorePercent = Math.round(props.score * 100);
                             
-                            const videoUrl = props.stream_url || "";
+                            // 🌟 網址快取邏輯：如果這個路口有 stream_url，且我們還沒存過，就存起來
+                            if (props.stream_url && !streamCache[camName]) {
+                                streamCache[camName] = props.stream_url;
+                            }
+                            
+                            // 讀取時，永遠優先使用我們第一次存下來的快取網址
+                            const videoUrl = streamCache[camName] || "";
+                            
                             const videoElement = videoUrl 
-                                ? `<video class="camera-stream" data-name="${props.name}" data-url="${videoUrl}" width="100%" style="border-radius: 5px; background: #000; margin-bottom: 8px;" controls muted autoplay playsinline></video>`
+                                ? `<video class="camera-stream" data-name="${camName}" data-url="${videoUrl}" width="100%" style="border-radius: 5px; background: #000; margin-bottom: 8px;" controls muted autoplay playsinline></video>`
                                 : `<div style="padding: 10px; background: #eee; text-align: center; border-radius: 5px; margin-bottom: 8px; font-size: 12px; color: #666;">無影像來源</div>`;
 
                             const popupContent = `
                                 <div style="font-family: sans-serif; padding: 5px; width: 280px;">
-                                    <b style="font-size: 14px; color: #333;">${props.name}</b><br>
+                                    <b style="font-size: 14px; color: #333;">${camName}</b><br>
                                     <hr style="margin: 8px 0; border: 0; border-top: 1px solid #eee;">
                                     ${videoElement}
                                     <div style="font-size: 13px;">
@@ -152,7 +151,6 @@
             }
         }
 
-        // 監聽彈窗打開：啟動影片，並標記目前正在觀看
         map.on('popupopen', function(e) {
             const videoElement = document.querySelector('.camera-stream');
             if (!videoElement) return;
@@ -167,23 +165,27 @@
             }
 
             if (Hls.isSupported()) {
+                // 🌟 優化 HLS 設定，防止直播斷流或卡黑屏
                 currentHls = new Hls({
-                    lowLatencyMode: true, // 降低延遲
+                    liveSyncDurationCount: 3,      // 強制同步到最新的直播片段
+                    liveMaxLatencyDurationCount: 10, // 如果延遲太大，自動跳轉到最新畫面
+                    enableWorker: true,
+                    lowLatencyMode: true
                 });
+                
                 currentHls.loadSource(streamUrl);
                 currentHls.attachMedia(videoElement);
                 currentHls.on(Hls.Events.MANIFEST_PARSED, function() {
                     videoElement.play().catch(e => console.log("播放被阻擋", e));
                 });
                 
-                // 🌟 HLS 錯誤自動恢復機制
+                // 處理網路不穩導致的黑屏，強制重新載入
                 currentHls.on(Hls.Events.ERROR, function (event, data) {
                     if (data.fatal) {
+                        console.warn("HLS 發生錯誤:", data.type);
                         if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                            console.log("網路錯誤，嘗試重新連線...");
                             currentHls.startLoad();
                         } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-                            console.log("多媒體錯誤，嘗試恢復...");
                             currentHls.recoverMediaError();
                         } else {
                             currentHls.destroy();
@@ -198,19 +200,17 @@
             }
         });
 
-        // 監聽彈窗關閉：釋放資源，解除鎖定，並立刻重繪一次地圖
         map.on('popupclose', function() {
             watchingCameraName = null;
             if (currentHls) {
                 currentHls.destroy();
                 currentHls = null;
             }
-            fetchTraffic(); // 關閉影片後，立刻把地圖路況更新到最新
+            fetchTraffic(); 
         });
 
-        // 啟動與自動刷新
         fetchTraffic();
-        setInterval(fetchTraffic, 5000); // 保持每 5 秒與後端同步
+        setInterval(fetchTraffic, 5000); 
     </script>
 </body>
 </html>
