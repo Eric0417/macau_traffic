@@ -3,17 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>澳門即時交通路況監控系統</title>
+    <title>澳門即時交通路況監控系統 (串流穩定版)</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-    
     <style>
         body, html { margin: 0; padding: 0; height: 100%; font-family: "Microsoft JhengHei", sans-serif; background: #1a1a1a; }
         #map { width: 100vw; height: 100vh; }
         
-        /* 更新時間面板 */
         .info-panel {
             position: absolute; top: 20px; left: 60px; z-index: 1000;
             background: rgba(40, 40, 40, 0.9); color: white;
@@ -25,18 +22,13 @@
         .info-panel h2 { margin: 0 0 5px 0; font-size: 18px; color: #00d4ff; }
         .update-time { font-size: 13px; color: #bbb; display: flex; align-items: center; }
         
-        /* 呼吸燈效果 */
         .status-dot {
             height: 8px; width: 8px; background-color: #28a745;
             border-radius: 50%; display: inline-block; margin-right: 8px;
             box-shadow: 0 0 8px #28a745;
             animation: pulse 2s infinite;
         }
-        @keyframes pulse {
-            0% { opacity: 1; }
-            50% { opacity: 0.3; }
-            100% { opacity: 1; }
-        }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
 
         .legend {
             position: absolute; bottom: 30px; left: 20px; z-index: 1000;
@@ -44,11 +36,7 @@
             border-radius: 8px; font-size: 14px; line-height: 1.8;
             box-shadow: 0 0 20px rgba(0,0,0,0.3);
         }
-        
-        /* 針對影片彈窗的美化 */
-        .leaflet-popup-content-wrapper {
-            background: rgba(255, 255, 255, 0.95);
-        }
+        .leaflet-popup-content-wrapper { background: rgba(255, 255, 255, 0.95); }
     </style>
 </head>
 <body>
@@ -71,62 +59,64 @@
     </div>
 
     <script>
-        // 初始化地圖
-        const map = L.map('map', {
-            zoomControl: false // 隱藏預設縮放鈕以美化介面
-        }).setView([22.193, 113.543], 14);
+        const map = L.map('map', { zoomControl: false }).setView([22.193, 113.543], 14);
 
-        // 使用 CartoDB Dark Matter 深色底圖
         L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
             attribution: '&copy; OpenStreetMap &copy; CARTO'
         }).addTo(map);
 
         let geojsonLayer = null;
-
-        // 👇 新增：全域變數來儲存目前的 HLS 播放器實例
         let currentHls = null;
+        
+        // 紀錄目前正在觀看的攝像頭名稱，如果不是 null，代表正在看影片
+        let watchingCameraName = null; 
 
         async function fetchTraffic() {
             try {
-                // 安全地取得目前打開的彈窗名稱
-                let currentPopupStr = null;
-                const activeVideo = document.querySelector('.camera-stream');
-                if (activeVideo) {
-                    currentPopupStr = activeVideo.getAttribute('data-name');
-                }
-
-                // ⚠️ 注意：這裡要換成你真實的 API 完整網址
-                const response = await fetch('https://macau-traffic.onrender.com/api/traffic');
-                
-                if (!response.ok) throw new Error(`HTTP 錯誤: ${response.status}`);
+                // ⚠️ 請確保此處為你正確的 API 網址
+                const response = await fetch('/api/traffic');
                 const data = await response.json();
 
-                // 更新左上角時間
                 if (data.last_updated) {
                     document.getElementById('sync-time').innerText = data.last_updated;
                 }
 
+                // 🌟 核心修復：如果使用者正在看影片，我們只更新文字數據，絕不刪除圖層！
+                if (watchingCameraName) {
+                    const camData = data.features.find(f => f.properties.type === 'camera' && f.properties.name === watchingCameraName);
+                    if (camData) {
+                        const props = camData.properties;
+                        const scorePercent = Math.round(props.score * 100);
+                        
+                        // 動態更新彈窗內的文字，不干擾影片播放
+                        const statScore = document.getElementById('stat-score');
+                        if (statScore) {
+                            statScore.innerText = scorePercent + '%';
+                            statScore.style.color = props.color;
+                        }
+                        const statVeh = document.getElementById('stat-veh');
+                        if (statVeh) statVeh.innerText = props.veh_active + ' 台';
+                        
+                        const statFlow = document.getElementById('stat-flow');
+                        if (statFlow) statFlow.innerText = props.flow_total + ' 輛/分';
+                    }
+                    // 結束這次更新，保留原本的地圖圖層與影片播放器
+                    return; 
+                }
+
+                // 如果沒有在看影片，才正常重繪整個地圖圖層
                 if (geojsonLayer) { map.removeLayer(geojsonLayer); }
 
                 geojsonLayer = L.geoJSON(data, {
                     style: function(feature) {
                         if (feature.properties.type === 'street') {
-                            return { 
-                                color: feature.properties.color, 
-                                weight: 5, 
-                                opacity: 0.7,
-                                lineCap: 'round'
-                            };
+                            return { color: feature.properties.color, weight: 5, opacity: 0.7, lineCap: 'round' };
                         }
                     },
                     pointToLayer: function(feature, latlng) {
                         if (feature.properties.type === 'camera') {
                             return L.circleMarker(latlng, {
-                                radius: 7,
-                                fillColor: feature.properties.color,
-                                color: "#ffffff",
-                                weight: 2,
-                                fillOpacity: 1
+                                radius: 7, fillColor: feature.properties.color, color: "#ffffff", weight: 2, fillOpacity: 1
                             });
                         }
                     },
@@ -137,7 +127,7 @@
                             
                             const videoUrl = props.stream_url || "";
                             const videoElement = videoUrl 
-                                ? `<video class="camera-stream" data-name="${props.name}" data-url="${videoUrl}" width="100%" style="border-radius: 5px; background: #000; margin-bottom: 8px;" controls muted playsinline></video>`
+                                ? `<video class="camera-stream" data-name="${props.name}" data-url="${videoUrl}" width="100%" style="border-radius: 5px; background: #000; margin-bottom: 8px;" controls muted autoplay playsinline></video>`
                                 : `<div style="padding: 10px; background: #eee; text-align: center; border-radius: 5px; margin-bottom: 8px; font-size: 12px; color: #666;">無影像來源</div>`;
 
                             const popupContent = `
@@ -146,18 +136,13 @@
                                     <hr style="margin: 8px 0; border: 0; border-top: 1px solid #eee;">
                                     ${videoElement}
                                     <div style="font-size: 13px;">
-                                        🚦 壅塞程度: <b style="color:${props.color}">${scorePercent}%</b><br>
-                                        🚗 即時車數: <b>${props.veh_active} 台</b><br>
-                                        📈 估算流量: <b>${props.flow_total} 輛/分</b>
+                                        🚦 壅塞程度: <b id="stat-score" style="color:${props.color}">${scorePercent}%</b><br>
+                                        🚗 即時車數: <b id="stat-veh">${props.veh_active} 台</b><br>
+                                        📈 估算流量: <b id="stat-flow">${props.flow_total} 輛/分</b>
                                     </div>
                                 </div>
                             `;
                             layer.bindPopup(popupContent, { maxWidth: 320 });
-
-                            // 自動恢復剛才打開的彈窗
-                            if (currentPopupStr === props.name) {
-                                setTimeout(() => layer.openPopup(), 10);
-                            }
                         }
                     }
                 }).addTo(map);
@@ -167,49 +152,65 @@
             }
         }
 
-        // 👇 新增：監聽彈窗打開事件，啟動影片串流
+        // 監聽彈窗打開：啟動影片，並標記目前正在觀看
         map.on('popupopen', function(e) {
             const videoElement = document.querySelector('.camera-stream');
             if (!videoElement) return;
 
+            watchingCameraName = videoElement.getAttribute('data-name');
             const streamUrl = videoElement.getAttribute('data-url');
             if (!streamUrl) return;
 
-            // 如果之前有其他的 HLS 正在播放，先銷毀釋放記憶體
             if (currentHls) {
                 currentHls.destroy();
                 currentHls = null;
             }
 
-            // 使用 hls.js 載入 m3u8
             if (Hls.isSupported()) {
-                currentHls = new Hls();
+                currentHls = new Hls({
+                    lowLatencyMode: true, // 降低延遲
+                });
                 currentHls.loadSource(streamUrl);
                 currentHls.attachMedia(videoElement);
                 currentHls.on(Hls.Events.MANIFEST_PARSED, function() {
-                    videoElement.play().catch(err => console.log("自動播放被瀏覽器阻止:", err));
+                    videoElement.play().catch(e => console.log("播放被阻擋", e));
                 });
-            } 
-            // 針對原生支援 HLS 的瀏覽器 (如 iOS Safari)
-            else if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
+                
+                // 🌟 HLS 錯誤自動恢復機制
+                currentHls.on(Hls.Events.ERROR, function (event, data) {
+                    if (data.fatal) {
+                        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                            console.log("網路錯誤，嘗試重新連線...");
+                            currentHls.startLoad();
+                        } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                            console.log("多媒體錯誤，嘗試恢復...");
+                            currentHls.recoverMediaError();
+                        } else {
+                            currentHls.destroy();
+                        }
+                    }
+                });
+            } else if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
                 videoElement.src = streamUrl;
                 videoElement.addEventListener('loadedmetadata', function() {
-                    videoElement.play().catch(err => console.log("自動播放被瀏覽器阻止:", err));
+                    videoElement.play();
                 });
             }
         });
 
-        // 👇 新增：監聽彈窗關閉事件，停止串流並釋放資源
+        // 監聽彈窗關閉：釋放資源，解除鎖定，並立刻重繪一次地圖
         map.on('popupclose', function() {
+            watchingCameraName = null;
             if (currentHls) {
                 currentHls.destroy();
                 currentHls = null;
             }
+            fetchTraffic(); // 關閉影片後，立刻把地圖路況更新到最新
         });
 
         // 啟動與自動刷新
         fetchTraffic();
-        setInterval(fetchTraffic, 5000); // 每 5 秒與後端同步一次
+        setInterval(fetchTraffic, 5000); // 保持每 5 秒與後端同步
     </script>
 </body>
 </html>
