@@ -10,92 +10,124 @@
     <style>
         body, html { margin: 0; padding: 0; height: 100%; font-family: "Microsoft JhengHei", sans-serif; background: #1a1a1a; }
         #map { width: 100vw; height: 100vh; }
-        
+
         .info-panel {
-            position: absolute; top: 20px; left: 60px; z-index: 1000;
-            background: rgba(40, 40, 40, 0.9); color: white;
-            padding: 12px 20px; border-radius: 8px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
-            border: 1px solid #444;
-            pointer-events: none;
+            position: absolute; top: 15px; left: 50%; transform: translateX(-50%); z-index: 1000;
+            background: rgba(30, 30, 30, 0.92); color: white;
+            padding: 12px 24px; border-radius: 10px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.6); border: 1px solid #444;
+            text-align: center; pointer-events: none;
         }
-        .info-panel h2 { margin: 0 0 5px 0; font-size: 18px; color: #00d4ff; }
-        .update-time { font-size: 13px; color: #bbb; display: flex; align-items: center; }
-        
+        .info-panel h2 { margin: 0 0 4px 0; font-size: 18px; color: #00d4ff; }
+        .stats-row { display: flex; gap: 20px; justify-content: center; font-size: 13px; color: #bbb; margin-top: 4px; }
+        .stats-row span { white-space: nowrap; }
+        .stats-row b { color: #fff; }
+
         .status-dot {
             height: 8px; width: 8px; background-color: #28a745;
-            border-radius: 50%; display: inline-block; margin-right: 8px;
-            box-shadow: 0 0 8px #28a745;
-            animation: pulse 2s infinite;
+            border-radius: 50%; display: inline-block; margin-right: 6px;
+            box-shadow: 0 0 8px #28a745; animation: pulse 2s infinite;
         }
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
 
         .legend {
             position: absolute; bottom: 30px; left: 20px; z-index: 1000;
-            background: rgba(255, 255, 255, 0.9); padding: 12px;
-            border-radius: 8px; font-size: 14px; line-height: 1.8;
-            box-shadow: 0 0 20px rgba(0,0,0,0.3);
+            background: rgba(30, 30, 30, 0.9); color: #ddd;
+            padding: 14px 16px; border-radius: 10px; font-size: 13px; line-height: 2.0;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5); border: 1px solid #444;
         }
-        .leaflet-popup-content-wrapper { background: rgba(255, 255, 255, 0.95); }
+        .legend b { color: #fff; }
+        .legend .swatch { display: inline-block; width: 20px; height: 4px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+        .leaflet-popup-content-wrapper { background: rgba(255, 255, 255, 0.95); border-radius: 8px; }
     </style>
 </head>
 <body>
 
     <div class="info-panel">
-        <h2>澳門即時交通監控</h2>
-        <div class="update-time">
+        <h2>澳門即時交通監控系統</h2>
+        <div class="stats-row">
             <span class="status-dot"></span>
-            最後更新時間：<span id="sync-time">載入中...</span>
+            <span>更新: <b id="sync-time">載入中...</b></span>
+            <span>|</span>
+            <span>攝影機: <b id="cam-count">0</b>/111</span>
+            <span>|</span>
+            <span>路段: <b id="road-count">0</b></span>
+            <span>|</span>
+            <span>壅塞路段: <b id="jam-roads" style="color:#dc3545">0</b></span>
         </div>
     </div>
 
     <div id="map"></div>
-    
+
     <div class="legend">
-        <b style="color: #333;">路況說明</b><br>
-        <span style="color: #28a745;">●</span> 🟢 暢通 (0-30%)<br>
-        <span style="color: #ffc107;">●</span> 🟡 車多 (30-60%)<br>
-        <span style="color: #dc3545;">●</span> 🔴 壅塞 (60-100%)
+        <b>道路壅塞程度</b><br>
+        <span class="swatch" style="background:#28a745;"></span> 暢通 (0–30%)<br>
+        <span class="swatch" style="background:#ffc107;"></span> 車多 (30–75%)<br>
+        <span class="swatch" style="background:#dc3545;"></span> 壅塞 (75–100%)<br>
+        <span class="swatch" style="background:#333333;"></span> 無數據路段<br>
+        <br><b>攝影機標記</b><br>
+        <span style="color:#28a745;">●</span> 暢通
+        <span style="color:#ffc107;">●</span> 車多
+        <span style="color:#dc3545;">●</span> 壅塞
     </div>
 
     <script>
-        const map = L.map('map', { zoomControl: false }).setView([22.193, 113.543], 14);
+        // 全澳門範圍
+        const MACAU_BOUNDS = [[22.10, 113.52], [22.22, 113.60]];
+
+        const map = L.map('map', {
+            zoomControl: true,
+            maxBounds: L.latLngBounds(MACAU_BOUNDS),
+            maxBoundsViscosity: 0.8,
+            minZoom: 12,
+            maxZoom: 18,
+        }).setView([22.175, 113.550], 13);
 
         L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; OpenStreetMap &copy; CARTO'
+            attribution: '&copy; OpenStreetMap &copy; CARTO',
+            maxZoom: 19,
         }).addTo(map);
+
+        // 限制地圖範圍到全澳門
+        map.setMaxBounds(L.latLngBounds(MACAU_BOUNDS));
 
         let geojsonLayer = null;
         let currentHls = null;
-        let watchingCameraName = null; 
-        
-        // 🌟 新增：串流網址快取字典。只在第一次收到時儲存，之後都不再改變。
+        let watchingCameraName = null;
         const streamCache = {};
 
         async function fetchTraffic() {
             try {
-                // ⚠️ 如果是在雲端，記得改成你的絕對網址，例如 'https://你的後端.onrender.com/api/traffic'
                 const response = await fetch('/api/traffic');
                 const data = await response.json();
 
-                if (data.last_updated) {
-                    document.getElementById('sync-time').innerText = data.last_updated;
-                }
+                if (!data || !data.features) return;
+
+                // 統計
+                const cameras = data.features.filter(f => f.properties.type === 'camera');
+                const streets = data.features.filter(f => f.properties.type === 'street');
+                const jamRoads = streets.filter(f => f.properties.score >= 0.75);
+
+                document.getElementById('sync-time').innerText = data.last_updated || '--';
+                document.getElementById('cam-count').innerText = cameras.length;
+                document.getElementById('road-count').innerText = streets.length;
+                document.getElementById('jam-roads').innerText = jamRoads.length;
 
                 if (watchingCameraName) {
-                    const camData = data.features.find(f => f.properties.type === 'camera' && f.properties.name === watchingCameraName);
+                    const camData = cameras.find(f => f.properties.name === watchingCameraName);
                     if (camData) {
-                        const props = camData.properties;
-                        const scorePercent = Math.round(props.score * 100);
-                        
-                        const statScore = document.getElementById('stat-score');
-                        if (statScore) { statScore.innerText = scorePercent + '%'; statScore.style.color = props.color; }
-                        const statVeh = document.getElementById('stat-veh');
-                        if (statVeh) statVeh.innerText = props.veh_active + ' 台';
-                        const statFlow = document.getElementById('stat-flow');
-                        if (statFlow) statFlow.innerText = props.flow_total + ' 輛/分';
+                        const p = camData.properties;
+                        const el = document.querySelector('.leaflet-popup-content');
+                        if (el) {
+                            const scoreEl = el.querySelector('#popup-score');
+                            const vehEl = el.querySelector('#popup-veh');
+                            const flowEl = el.querySelector('#popup-flow');
+                            if (scoreEl) { scoreEl.innerText = Math.round(p.score * 100) + '%'; scoreEl.style.color = p.color; }
+                            if (vehEl) vehEl.innerText = p.veh_active + ' 台';
+                            if (flowEl) flowEl.innerText = p.flow_total + ' 輛/分';
+                        }
                     }
-                    return; 
+                    return;
                 }
 
                 if (geojsonLayer) { map.removeLayer(geojsonLayer); }
@@ -103,41 +135,55 @@
                 geojsonLayer = L.geoJSON(data, {
                     style: function(feature) {
                         if (feature.properties.type === 'street') {
-                            return { color: feature.properties.color, weight: 5, opacity: 0.7, lineCap: 'round' };
+                            const sc = feature.properties.score || 0;
+                            return {
+                                color: feature.properties.color,
+                                weight: sc > 0.001 ? 4 : 1.5,
+                                opacity: sc > 0.001 ? 0.75 : 0.35,
+                                lineCap: 'round',
+                            };
                         }
                     },
                     pointToLayer: function(feature, latlng) {
                         if (feature.properties.type === 'camera') {
-                            return L.circleMarker(latlng, { radius: 7, fillColor: feature.properties.color, color: "#ffffff", weight: 2, fillOpacity: 1 });
+                            const sc = feature.properties.score || 0;
+                            return L.circleMarker(latlng, {
+                                radius: 6,
+                                fillColor: feature.properties.color,
+                                color: "#ffffff",
+                                weight: 1.5,
+                                fillOpacity: 0.9,
+                            });
                         }
                     },
                     onEachFeature: function(feature, layer) {
+                        if (feature.properties.type === 'street' && feature.properties.score > 0.001) {
+                            const sc = Math.round(feature.properties.score * 100);
+                            layer.bindTooltip(`${sc}%`, { permanent: false, direction: 'center', className: 'road-tooltip' });
+                        }
                         if (feature.properties.type === 'camera') {
                             const props = feature.properties;
                             const camName = props.name;
                             const scorePercent = Math.round(props.score * 100);
-                            
-                            // 🌟 網址快取邏輯：如果這個路口有 stream_url，且我們還沒存過，就存起來
+
                             if (props.stream_url && !streamCache[camName]) {
                                 streamCache[camName] = props.stream_url;
                             }
-                            
-                            // 讀取時，永遠優先使用我們第一次存下來的快取網址
                             const videoUrl = streamCache[camName] || "";
-                            
-                            const videoElement = videoUrl 
-                                ? `<video class="camera-stream" data-name="${camName}" data-url="${videoUrl}" width="100%" style="border-radius: 5px; background: #000; margin-bottom: 8px;" controls muted autoplay playsinline></video>`
-                                : `<div style="padding: 10px; background: #eee; text-align: center; border-radius: 5px; margin-bottom: 8px; font-size: 12px; color: #666;">無影像來源</div>`;
+
+                            const videoElement = videoUrl
+                                ? `<video class="camera-stream" data-name="${camName}" data-url="${videoUrl}" width="100%" style="border-radius:5px;background:#000;margin-bottom:8px;" controls muted autoplay playsinline></video>`
+                                : `<div style="padding:10px;background:#222;text-align:center;border-radius:5px;margin-bottom:8px;font-size:12px;color:#888;">暫無影像訊號</div>`;
 
                             const popupContent = `
-                                <div style="font-family: sans-serif; padding: 5px; width: 280px;">
-                                    <b style="font-size: 14px; color: #333;">${camName}</b><br>
-                                    <hr style="margin: 8px 0; border: 0; border-top: 1px solid #eee;">
+                                <div style="font-family:sans-serif;padding:5px;width:280px;">
+                                    <b style="font-size:14px;color:#333;">${camName}</b><br>
+                                    <hr style="margin:8px 0;border:0;border-top:1px solid #eee;">
                                     ${videoElement}
-                                    <div style="font-size: 13px;">
-                                        🚦 壅塞程度: <b id="stat-score" style="color:${props.color}">${scorePercent}%</b><br>
-                                        🚗 即時車數: <b id="stat-veh">${props.veh_active} 台</b><br>
-                                        📈 估算流量: <b id="stat-flow">${props.flow_total} 輛/分</b>
+                                    <div style="font-size:13px;">
+                                        🚦 壅塞程度: <b id="popup-score" style="color:${props.color}">${scorePercent}%</b><br>
+                                        🚗 即時車數: <b id="popup-veh">${props.veh_active} 台</b><br>
+                                        📈 估算流量: <b id="popup-flow">${props.flow_total} 輛/分</b>
                                     </div>
                                 </div>
                             `;
@@ -145,44 +191,37 @@
                         }
                     }
                 }).addTo(map);
-            } catch (error) { 
+
+            } catch (error) {
                 console.error('無法抓取資料:', error);
                 document.getElementById('sync-time').innerText = "連線失敗";
             }
         }
 
+        // HLS 影片播放
         map.on('popupopen', function(e) {
             const videoElement = document.querySelector('.camera-stream');
             if (!videoElement) return;
-
             watchingCameraName = videoElement.getAttribute('data-name');
             const streamUrl = videoElement.getAttribute('data-url');
             if (!streamUrl) return;
 
-            if (currentHls) {
-                currentHls.destroy();
-                currentHls = null;
-            }
+            if (currentHls) { currentHls.destroy(); currentHls = null; }
 
             if (Hls.isSupported()) {
-                // 🌟 優化 HLS 設定，防止直播斷流或卡黑屏
                 currentHls = new Hls({
-                    liveSyncDurationCount: 3,      // 強制同步到最新的直播片段
-                    liveMaxLatencyDurationCount: 10, // 如果延遲太大，自動跳轉到最新畫面
+                    liveSyncDurationCount: 3,
+                    liveMaxLatencyDurationCount: 10,
                     enableWorker: true,
-                    lowLatencyMode: true
+                    lowLatencyMode: true,
                 });
-                
                 currentHls.loadSource(streamUrl);
                 currentHls.attachMedia(videoElement);
                 currentHls.on(Hls.Events.MANIFEST_PARSED, function() {
                     videoElement.play().catch(e => console.log("播放被阻擋", e));
                 });
-                
-                // 處理網路不穩導致的黑屏，強制重新載入
-                currentHls.on(Hls.Events.ERROR, function (event, data) {
+                currentHls.on(Hls.Events.ERROR, function(event, data) {
                     if (data.fatal) {
-                        console.warn("HLS 發生錯誤:", data.type);
                         if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
                             currentHls.startLoad();
                         } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
@@ -194,23 +233,18 @@
                 });
             } else if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
                 videoElement.src = streamUrl;
-                videoElement.addEventListener('loadedmetadata', function() {
-                    videoElement.play();
-                });
+                videoElement.addEventListener('loadedmetadata', function() { videoElement.play(); });
             }
         });
 
         map.on('popupclose', function() {
             watchingCameraName = null;
-            if (currentHls) {
-                currentHls.destroy();
-                currentHls = null;
-            }
-            fetchTraffic(); 
+            if (currentHls) { currentHls.destroy(); currentHls = null; }
+            fetchTraffic();
         });
 
         fetchTraffic();
-        setInterval(fetchTraffic, 5000); 
+        setInterval(fetchTraffic, 5000);
     </script>
 </body>
 </html>

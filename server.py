@@ -26,15 +26,20 @@ def serve_frontend():
 def get_traffic_data():
     return traffic_data
 
-# 3. AI 接收端點：你本地的 Python 腳本會每 5 秒把數據 POST 到這裡
+# 3. AI 接收端點：v2_detector.py 每 5 秒推送 GeoJSON
 @app.post("/api/update")
 async def update_traffic_data(request: Request):
     global traffic_data
     try:
-        # 接收來自邊緣運算 AI 的 GeoJSON 數據
-        traffic_data = await request.json()
-        return {"status": "success", "message": "Data updated"}
+        data = await request.json()
+        features = data.get("features", [])
+        cameras = [f for f in features if f.get("properties", {}).get("type") == "camera"]
+        streets = [f for f in features if f.get("properties", {}).get("type") == "street"]
+        traffic_data = data
+        print(f"收到數據: {len(cameras)} 攝影機, {len(streets)} 路段, 更新時間 {data.get('last_updated', '?')}")
+        return {"status": "success", "cameras": len(cameras), "streets": len(streets)}
     except Exception as e:
+        print(f"接收錯誤: {e}")
         return {"status": "error", "message": str(e)}
 
 if __name__ == "__main__":
