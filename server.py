@@ -1,7 +1,10 @@
+import os
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 app = FastAPI()
 
@@ -19,7 +22,7 @@ traffic_data = {"type": "FeatureCollection", "features": []}
 # 1. 網頁端點：當使用者在瀏覽器輸入網址時，給他 index.html
 @app.get("/")
 def serve_frontend():
-    return FileResponse("index.html")
+    return FileResponse(os.path.join(BASE_DIR, "index.html"))
 
 # 2. 前端索取端點：網頁每 5 秒會來這裡拿最新數據
 @app.get("/api/traffic")
